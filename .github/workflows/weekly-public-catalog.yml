@@ -1,0 +1,72 @@
+name: Weekly public literature catalog
+
+on:
+  schedule:
+    # Every Monday at 07:17 UTC; GitHub's scheduled jobs can be delayed.
+    - cron: '17 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: weekly-public-catalog
+  cancel-in-progress: false
+
+jobs:
+  update-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run offline regression tests
+        run: python -m unittest discover -s tests -q
+      - name: Verify and preserve existing public catalog
+        shell: bash
+        run: |
+          test -s docs/articles.json
+          python -m collector check-public --path docs/articles.json --min-articles 1
+          cp docs/articles.json "$RUNNER_TEMP/previous_articles.json"
+      - name: Collect overlapping 45-day Crossref window
+        run: python -m collector --db data/automation.sqlite3 update --days 45
+      - name: Build, merge, and validate public catalog
+        shell: bash
+        run: |
+          python -m collector --db data/automation.sqlite3 build-site --output docs
+          python -m collector merge-site --previous "$RUNNER_TEMP/previous_articles.json" --incoming docs/articles.json --output docs/articles.json --exclusions config/public-exclusions.json
+          python -m collector check-public --path docs/articles.json --min-articles 1
+      - name: Commit only allowlisted public site files
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- docs/index.html docs/app.js docs/styles.css docs/articles.json docs/.nojekyll
+          if ! git diff --cached --quiet; then
+            git commit -m "Refresh public literature catalog"
+            git push
+          fi
+      - name: Prepare allowlisted deployment directory
+        shell: bash
+        run: |
+          mkdir -p public_deploy
+          cp docs/index.html docs/app.js docs/styles.css docs/articles.json docs/.nojekyll public_deploy/
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Upload public site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public_deploy
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

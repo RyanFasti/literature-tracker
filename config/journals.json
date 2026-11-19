@@ -1,0 +1,67 @@
+[
+  {
+    "id": "nature_communications",
+    "name": "Nature Communications",
+    "issns": [
+      "2041-1723"
+    ],
+    "crossref_issns": [
+      "2041-1723"
+    ]
+  },
+  {
+    "id": "science_advances",
+    "name": "Science Advances",
+    "issns": [
+      "2375-2548"
+    ],
+    "crossref_issns": [
+      "2375-2548"
+    ]
+  },
+  {
+    "id": "acs_energy_letters",
+    "name": "ACS Energy Letters",
+    "issns": [
+      "2380-8195"
+    ],
+    "crossref_issns": [
+      "2380-8195"
+    ]
+  },
+  {
+    "id": "advanced_materials",
+    "name": "Advanced Materials",
+    "issns": [
+      "1521-4095",
+      "0935-9648"
+    ],
+    "crossref_issns": [
+      "1521-4095",
+      "0935-9648"
+    ]
+  },
+  {
+    "id": "chemical_engineering_journal",
+    "name": "Chemical Engineering Journal",
+    "issns": [
+      "1385-8947",
+      "1873-3212"
+    ],
+    "crossref_issns": [
+      "1385-8947"
+    ]
+  },
+  {
+    "id": "ees",
+    "name": "Energy & Environmental Science",
+    "issns": [
+      "1754-5706",
+      "1754-5692"
+    ],
+    "crossref_issns": [
+      "1754-5706",
+      "1754-5692"
+    ]
+  }
+]

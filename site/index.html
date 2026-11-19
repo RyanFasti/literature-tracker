@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Literature Tracker — Public catalog</title>
+<link rel="stylesheet" href="./styles.css">
+<script defer src="./app.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><div class="mark">LT</div><div><strong>Literature Tracker</strong><small>Research paper catalog</small></div></div>
+  <div class="scope">Read-only public snapshot · No account or private notes</div>
+</header>
+<main>
+  <div class="eyebrow">SIX-JOURNAL LITERATURE FEED</div>
+  <div class="heading"><div><h1>Browse the literature</h1><p>Halide-perovskite research selected for inclusion or review. Classification is heuristic, not peer review.</p></div><div class="count"><strong id="totalCount">—</strong><span>papers in catalog</span></div></div>
+  <section class="controls" aria-label="Search and filter">
+    <label class="search"><span>Search papers</span><input id="search" type="search" placeholder="Title, author, DOI, journal…" autocomplete="off"></label>
+    <label>Journal<select id="journal"><option value="">All journals</option></select></label>
+    <label>Decision<select id="decision"><option value="">Included + review</option><option value="include">Included</option><option value="review">Needs review</option></select></label>
+    <label>Sort<select id="sort"><option value="discovered">Recently discovered</option><option value="published">Publication date</option><option value="title">Title A–Z</option></select></label>
+  </section>
+  <div class="results"><strong id="resultCount">Loading…</strong><span id="snapshot"></span></div>
+  <section id="articles" class="articles" aria-live="polite"></section>
+  <nav class="pages" aria-label="Result pages"><button id="prev" disabled>Previous</button><span id="page">—</span><button id="next" disabled>Next</button></nav>
+  <footer>This site contains only a public snapshot. It does not provide synchronized ratings, notes, or reading status. Publication dates may be year- or month-precision; verify claims with the publisher.</footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,11 @@
+# Private SQLite database, backups, audit files, and local export data.
+/data/
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+.env
+.env.*
+__pycache__/
+*.pyc
+# Public static site can be committed deliberately under /docs/.
