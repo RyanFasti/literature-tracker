@@ -32,8 +32,11 @@ def _validate(data):
         if normalize_doi(p['doi']) != p['doi'] or p['doi'] in seen:
             raise ValueError('Invalid or duplicate pending DOI')
         seen.add(p['doi'])
-        if not isinstance(p['title'], str) or not p['title']:
-            raise ValueError('Missing pending paper title')
+        # Crossref sometimes supplies a DOI without a title. Preserve that DOI
+        # for future metadata/abstract retries rather than failing the export.
+        # A title must still be present and be a string; empty is allowed.
+        if not isinstance(p['title'], str):
+            raise ValueError('Invalid pending paper title')
         if not isinstance(p.get('authors', []), list) or not isinstance(p.get('issns', []), list):
             raise ValueError('Invalid pending authors/ISSNs')
         for key, val in p.items():
@@ -53,12 +56,14 @@ def export_pending(conn, path):
         record = {k: paper[k] for k in FIELDS if k in paper}
         papers.append({'journal_id': row['journal_id'], 'paper': record})
     payload = _validate({'schema_version': 1, 'generated_at': now(), 'papers': papers})
+    missing_titles = sum(not row['paper']['title'].strip() for row in papers)
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     temp = target.with_name(target.name + '.tmp')
     temp.write_text(json.dumps(payload, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     temp.replace(target)
-    return {'pending': len(papers), 'path': str(target), 'abstracts_exported': False}
+    return {'pending': len(papers), 'missing_titles': missing_titles,
+            'path': str(target), 'abstracts_exported': False}
 
 
 def import_pending(conn, path):

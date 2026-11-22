@@ -18,9 +18,15 @@ def build_public_site(conn, output_dir='docs', include_abstracts=False):
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     papers = []
+    titleless_excluded = 0
     keywords = read_topic_keywords()
     for row in conn.execute("SELECT * FROM articles WHERE decision IN ('include','review') "
                             "ORDER BY COALESCE(first_seen_at,added_at) DESC,doi"):
+        # Preserve incomplete metadata in SQLite, but never publish an invalid
+        # blank-title catalog entry (which would fail public validation).
+        if not (row['title'] or '').strip():
+            titleless_excluded += 1
+            continue
         item = {key: row[key] for key in FIELDS}
         item['authors'] = json.loads(row['authors_json'])
         item['topics'] = suggest_topics(row['title'], row['abstract'], keywords=keywords)
@@ -37,6 +43,7 @@ def build_public_site(conn, output_dir='docs', include_abstracts=False):
         shutil.copyfile(SITE_ASSETS / asset, output / asset)
     (output / '.nojekyll').touch()
     return {'output': str(output), 'public_articles': len(papers),
+            'titleless_excluded': titleless_excluded,
             'abstracts_included': bool(include_abstracts),
             'private_annotations_exported': False,
             'notes': 'Static read-only catalog; user state is NOT synchronized'}

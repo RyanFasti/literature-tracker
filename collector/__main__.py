@@ -24,6 +24,7 @@ def collect(conn, journals, start, end, max_abstract_lookups=100, resolver=None)
                  'created_only': 0, 'updated_only': 0,
                  'imprecise_publication_dates': 0,
                  'abstract_resolved': 0, 'abstract_pending': 0,
+                 'metadata_pending': 0,
                  'abstract_remote_lookups': 0, 'abstract_provider_errors': 0,
                  'deleted_skipped': 0}
         started = now()
@@ -60,6 +61,14 @@ def collect(conn, journals, start, end, max_abstract_lookups=100, resolver=None)
                                 count['abstract_provider_errors'] += 1
                             continue
                         count['abstract_resolved'] += 1
+                        if not (paper.get('title') or '').strip():
+                            # A DOI can have an abstract but no deposited title.
+                            # Do not publish a blank-title article; keep the DOI
+                            # for a future metadata retry instead.
+                            from .db import record_pending_abstract
+                            record_pending_abstract(conn, paper, j['id'])
+                            count['metadata_pending'] += 1
+                            continue
                         classification = classify(paper)
                         decision = classification['decision']
                         count[decision] += 1
@@ -94,6 +103,7 @@ def collect(conn, journals, start, end, max_abstract_lookups=100, resolver=None)
                        'imprecise_publication_dates': count['imprecise_publication_dates'],
                        'abstract_resolved': count['abstract_resolved'],
                        'abstract_pending': count['abstract_pending'],
+                       'metadata_pending': count['metadata_pending'],
                        'abstract_remote_lookups': count['abstract_remote_lookups'],
                        'abstract_provider_errors': count['abstract_provider_errors'],
                        'deleted_skipped': count['deleted_skipped'],

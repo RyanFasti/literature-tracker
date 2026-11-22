@@ -91,7 +91,7 @@ def repair_abstracts(conn, journals, journal_id='all', limit=20, retry=False,
         raise ValueError('Unknown repair source')
     resolver = resolver or AbstractResolver()
     summary = {'journal': journal_id, 'checked': 0, 'available': 0,
-               'unresolved': 0, 'deferred': 0, 'promoted': 0,
+               'unresolved': 0, 'deferred': 0, 'metadata_pending': 0, 'promoted': 0,
                'rejected_after_abstract': 0, 'provider_errors': 0,
                'dry_run': bool(dry_run), 'results': []}
     seen = set()
@@ -120,19 +120,27 @@ def repair_abstracts(conn, journals, journal_id='all', limit=20, retry=False,
             paper['abstract'] = result['abstract']
             paper['abstract_source'] = result['source']
             paper['abstract_status'] = 'available'
-            decision = classify(paper)
-            row['decision'] = decision['decision']
-            if origin == 'archived' and decision['decision'] != 'reject':
-                summary['promoted'] += 1
-            if decision['decision'] == 'reject':
-                summary['rejected_after_abstract'] += 1
-            if not dry_run:
-                if origin == 'articles' or conn.execute(
-                        'SELECT 1 FROM articles WHERE doi=?', (doi,)).fetchone() or decision['decision'] != 'reject':
-                    manually_added = conn.execute('SELECT manually_added FROM articles WHERE doi=?', (doi,)).fetchone()
-                    upsert_article(conn, paper, decision, manual=bool(manually_added and manually_added[0]))
-                else:
-                    record_rejected(conn, paper, decision, j_id)
+            if not (paper.get('title') or '').strip():
+                # A retrieved abstract does not make a titleless record safe
+                # to publish. Keep the DOI in the retry inventory.
+                summary['metadata_pending'] += 1
+                row['decision'] = 'pending_metadata'
+                if not dry_run:
+                    record_pending_abstract(conn, paper, j_id)
+            else:
+                decision = classify(paper)
+                row['decision'] = decision['decision']
+                if origin == 'archived' and decision['decision'] != 'reject':
+                    summary['promoted'] += 1
+                if decision['decision'] == 'reject':
+                    summary['rejected_after_abstract'] += 1
+                if not dry_run:
+                    if origin == 'articles' or conn.execute(
+                            'SELECT 1 FROM articles WHERE doi=?', (doi,)).fetchone() or decision['decision'] != 'reject':
+                        manually_added = conn.execute('SELECT manually_added FROM articles WHERE doi=?', (doi,)).fetchone()
+                        upsert_article(conn, paper, decision, manual=bool(manually_added and manually_added[0]))
+                    else:
+                        record_rejected(conn, paper, decision, j_id)
         else:
             summary['unresolved'] += 1
             if status == 'provider_error':

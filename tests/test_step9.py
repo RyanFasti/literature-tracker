@@ -19,6 +19,7 @@ from collector.db import (connect, get_known_abstract, quality_report,
                           record_pending_abstract, record_rejected,
                           set_user_state, upsert_article)
 from collector.pending_index import export_pending, import_pending
+from collector.site import build_public_site
 
 CEJ = {'id': 'chemical_engineering_journal', 'name': 'Chemical Engineering Journal',
        'issns': ['1385-8947'], 'crossref_issns': ['1385-8947']}
@@ -141,6 +142,22 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.conn.execute('SELECT count(*) FROM pending_abstracts').fetchone()[0], 1)
         self.assertEqual(self.conn.execute('SELECT count(*) FROM articles').fetchone()[0], 0)
 
+    def test_titleless_crossref_doi_with_abstract_is_pending_not_published(self):
+        incomplete = paper(doi='10.1016/j.cej.2026.199998', title='')
+        def crossref(issn, start, end, mode='pub'):
+            return iter([incomplete] if mode == 'pub' else [])
+        resolver = AbstractResolver({'synthetic': lambda _: ABSTRACT})
+        with patch('collector.__main__.crossref_journal', side_effect=crossref):
+            with redirect_stdout(io.StringIO()):
+                report = collect(self.conn, [CEJ], '2026-11-01', '2026-11-18',
+                                 max_abstract_lookups=1, resolver=resolver)[0]
+        self.assertEqual(report['abstract_resolved'], 1)
+        self.assertEqual(report['metadata_pending'], 1)
+        self.assertEqual(self.conn.execute('SELECT count(*) FROM pending_abstracts').fetchone()[0], 1)
+        self.assertEqual(self.conn.execute('SELECT count(*) FROM articles').fetchone()[0], 0)
+        target = Path(self.tmp.name) / 'pending-titleless.json'
+        self.assertEqual(export_pending(self.conn, target)['missing_titles'], 1)
+
     def test_cejs_classified_only_after_abstract(self):
         unrelated = paper('10.1016/j.cej.2026.999991', 'Battery recycling processes')
         relevant = paper('10.1016/j.cej.2026.999992', 'Transport mechanisms in thin films')
@@ -197,6 +214,26 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.conn.execute('SELECT count(*) FROM pending_abstracts').fetchone()[0], 1)
         self.assertEqual(self.conn.execute('SELECT count(*) FROM abstract_checks').fetchone()[0], 0)
 
+    def test_repair_does_not_publish_titleless_record(self):
+        p = paper(doi='10.1016/j.cej.2026.199997', title='')
+        record_pending_abstract(self.conn, p, CEJ['id'])
+        resolver = AbstractResolver({'synthetic': lambda _: ABSTRACT})
+        report = repair_abstracts(self.conn, self.journals, CEJ['id'], limit=1,
+                                  sources=('pending',), resolver=resolver)
+        self.assertEqual(report['available'], 1)
+        self.assertEqual(report['metadata_pending'], 1)
+        self.assertEqual(self.conn.execute('SELECT count(*) FROM articles').fetchone()[0], 0)
+        self.assertEqual(self.conn.execute('SELECT count(*) FROM pending_abstracts').fetchone()[0], 1)
+
+    def test_public_catalog_skips_legacy_blank_title_without_deleting_it(self):
+        p = paper(doi='10.1016/j.cej.2026.199996', title='', abstract=ABSTRACT)
+        upsert_article(self.conn, p, {'decision': 'include', 'score': 4,
+                                     'version': 'rules_v2'})
+        result = build_public_site(self.conn, Path(self.tmp.name) / 'public')
+        self.assertEqual(result['public_articles'], 0)
+        self.assertEqual(result['titleless_excluded'], 1)
+        self.assertEqual(self.conn.execute('SELECT count(*) FROM articles').fetchone()[0], 1)
+
     def test_public_pending_index_excludes_abstracts_and_private_state(self):
         p = paper()
         p['secret'] = 'PRIVATE NOTE'
@@ -215,6 +252,36 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(other.execute('SELECT count(*) FROM pending_abstracts').fetchone()[0], 1)
         finally:
             other.close()
+
+    def test_pending_export_preserves_crossref_doi_with_empty_title(self):
+        # Crossref occasionally has a DOI but no deposited title. Such a
+        # record must remain retryable, not fail the entire weekly workflow.
+        p = normalize_crossref({'DOI': '10.1016/j.cej.2026.199999',
+                                'title': [], 'container-title': [CEJ['name']]})
+        self.assertEqual(p['title'], '')
+        record_pending_abstract(self.conn, p, CEJ['id'])
+        target = Path(self.tmp.name) / 'titleless-pending.json'
+        result = export_pending(self.conn, target)
+        self.assertEqual(result['pending'], 1)
+        self.assertEqual(result['missing_titles'], 1)
+        payload = json.loads(target.read_text(encoding='utf-8'))
+        self.assertEqual(payload['papers'][0]['paper']['title'], '')
+        self.assertEqual(payload['papers'][0]['paper']['doi'], p['doi'])
+        other = connect(Path(self.tmp.name) / 'titleless-import.sqlite3')
+        try:
+            self.assertEqual(import_pending(other, target)['imported'], 1)
+            self.assertEqual(other.execute('SELECT doi FROM pending_abstracts').fetchone()[0], p['doi'])
+        finally:
+            other.close()
+
+    def test_pending_export_rejects_non_string_title(self):
+        p = paper()
+        p['title'] = None
+        record_pending_abstract(self.conn, p, CEJ['id'])
+        target = Path(self.tmp.name) / 'invalid-title.json'
+        with self.assertRaisesRegex(ValueError, 'Invalid pending paper title'):
+            export_pending(self.conn, target)
+        self.assertFalse(target.exists())
 
     def test_public_pending_index_rejects_private_field_injection(self):
         target = Path(self.tmp.name) / 'unsafe.json'
