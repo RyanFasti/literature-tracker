@@ -12,7 +12,7 @@ from .db import now
 ARTICLE_FIELDS = frozenset({
     'doi', 'title', 'journal', 'published_date', 'published_date_precision',
     'published_online', 'type', 'decision', 'abstract_status', 'first_seen_at',
-    'manually_added', 'authors',
+    'manually_added', 'authors', 'topics',
 })
 TOP_FIELDS = frozenset({'schema_version', 'generated_at', 'abstracts_included', 'articles'})
 REQUIRED_FIELDS = frozenset({'doi', 'title', 'decision', 'authors'})
@@ -49,6 +49,13 @@ def read_public_catalog(path):
             raise ValueError(f'Missing title for {doi}')
         if not isinstance(item['authors'], list) or not all(isinstance(a, str) for a in item['authors']):
             raise ValueError(f'Invalid authors for {doi}')
+        if 'topics' in item:
+            from .topics import TOPIC_IDS
+            value = item['topics']
+            if (not isinstance(value, list) or len(value) > len(TOPIC_IDS) or
+                    len(set(map(str, value))) != len(value) or
+                    any(not isinstance(t, str) or t not in TOPIC_IDS for t in value)):
+                raise ValueError(f'Invalid topics for {doi}')
         if item.get('published_date_precision') not in PRECISION:
             raise ValueError(f'Invalid publication date precision for {doi}')
         if item.get('manually_added', 0) not in (0, 1, False, True):

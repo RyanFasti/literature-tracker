@@ -238,7 +238,8 @@ class LiteratureHandler(BaseHTTPRequestHandler):
         files = {'/': ('index.html', 'text/html; charset=utf-8'),
                  '/index.html': ('index.html', 'text/html; charset=utf-8'),
                  '/app.js': ('app.js', 'application/javascript; charset=utf-8'),
-                 '/styles.css': ('styles.css', 'text/css; charset=utf-8')}
+                 '/styles.css': ('styles.css', 'text/css; charset=utf-8'),
+                 '/logo.png': ('logo.png', 'image/png')}
         if parsed.path not in files:
             return self._error(404, 'Not found')
         filename, mime = files[parsed.path]

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#004c54">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'">
+<title>Literature Tracker — Research workspace</title>
+<link rel="icon" href="/logo.png" type="image/png">
+<link rel="stylesheet" href="./styles.css">
+<script type="module" src="./app.js"></script>
+</head>
+<body data-theme="light">
+<header class="topbar">
+  <a class="brand" href="/team/" aria-label="Literature Tracker home"><span class="logo-frame"><img src="/logo.png" alt="" width="54" height="42"></span><span><strong>Literature Tracker</strong><small>Research workspace</small></span></a>
+  <div class="toplinks"><a class="public-link" href="/">Public catalog <span aria-hidden="true">↗</span></a><span id="account">Checking sign-in…</span><button id="logout" class="ghost" hidden>Sign out</button></div>
+</header>
+<section id="signIn" class="login" hidden>
+  <span class="logo-frame login-logo"><img src="/logo.png" alt="" width="100" height="70"></span>
+  <div class="eyebrow">YOUR RESEARCH, ORGANIZED</div>
+  <h1>Welcome to Literature Tracker.</h1>
+  <p>Search the literature, review new papers, and keep your research notes in one place. Your annotations remain private by default.</p>
+  <a class="primary-link" href="/auth/login">Sign in with GitHub</a>
+</section>
+<div id="workspace" class="app-shell" hidden>
+  <aside class="sidebar" aria-label="Workspace navigation">
+    <div class="side-label">WORKSPACE</div>
+    <nav class="side-nav" aria-label="Research views">
+      <button data-view="browse" class="active"><span class="nav-symbol">▤</span> Browse Papers</button>
+      <button data-view="triage"><span class="nav-symbol">◉</span> Fast Review <span id="unseenCount" class="nav-count">—</span></button>
+      <button data-view="shared"><span class="nav-symbol">▧</span> Shared</button>
+      <button data-view="settings"><span class="nav-symbol">⚙</span> Settings</button>
+    </nav>
+    <div class="sidebar-bottom"><div class="sidebar-kicker">YOUR CATALOG</div><strong id="totalCount">—</strong><span>papers indexed</span><small id="snapshot">Loading snapshot…</small></div>
+  </aside>
+  <main class="main-content">
+    <div class="eyebrow" id="viewEyebrow">LITERATURE LIBRARY</div>
+    <div class="heading"><div><h1 id="viewTitle">Browse papers</h1><p id="viewDescription">Find, filter and organize research relevant to your work.</p></div><div class="heading-action"><button id="refresh" class="outline" type="button">Refresh</button></div></div>
+    <div class="filter-panel" id="filterPanel">
+      <label class="search-field"><span>Search literature</span><input id="search" type="search" placeholder="Search titles, authors, journals, DOIs…" autocomplete="off"></label>
+      <div class="filter-grid">
+        <label>Journal<select id="journal"><option value="">All journals</option></select></label>
+        <label>Research topic<select id="category"><option value="">All topics</option></select></label>
+        <label>Article type<select id="kind"><option value="">All article types</option><option value="research">Research articles</option><option value="review">Review articles</option><option value="unknown">Unverified type</option></select></label>
+        <label>Reading status<select id="readStatus"><option value="">All statuses</option><option value="unseen">Not acknowledged</option><option value="acknowledged">Acknowledged</option><option value="rated">Rated</option><option value="annotated">Has notes</option><option value="hidden">Hidden only</option></select></label>
+        <label>Minimum rating<select id="minRating"><option value="0">Any rating</option><option value="1">1+ stars</option><option value="2">2+ stars</option><option value="3">3+ stars</option><option value="4">4+ stars</option><option value="5">5 stars</option></select></label>
+        <label>Abstract metadata<select id="abstract"><option value="">Any status</option><option value="missing">Not indexed</option><option value="available">Indexed</option></select></label>
+        <label>Published from<input id="dateFrom" type="date"></label>
+        <label>Published through<input id="dateTo" type="date"></label>
+        <label>Discovered<select id="recency"><option value="0">Any time</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last 365 days</option></select></label>
+        <label>Sort by<select id="sort"><option value="discovered">Recently discovered</option><option value="published">Publication date</option><option value="rating">Highest rating</option><option value="title">Title A–Z</option></select></label>
+      </div>
+      <div class="filter-bottom"><label id="showHiddenWrap" class="filter-checkbox"><input id="showHidden" type="checkbox"> Include hidden papers</label><button id="clearFilters" class="outline" type="button">Clear filters</button></div>
+    </div>
+    <div id="message" role="status" aria-live="polite"></div>
+    <section id="settingsPage" class="settings-page" hidden aria-label="Workspace settings">
+      <div class="settings-section"><h2>Appearance</h2><p>Preferences are saved to your account and follow you across devices.</p>
+        <fieldset><legend>Theme</legend><div class="setting-choices"><label><input type="radio" name="theme" value="light" checked> Light</label><label><input type="radio" name="theme" value="dark"> Dark</label></div></fieldset>
+        <label class="setting-check"><input id="defaultAbstract" type="checkbox"> Expand abstracts by default in Browse Papers</label>
+      </div>
+      <div class="settings-section"><h2>Topic keywords</h2><p>Edit comma-separated phrases for each topic. Changes affect your personal topic suggestions immediately; manual paper tags still take precedence. Export the collector configuration to apply the same rules to future weekly catalog builds.</p><div id="keywordEditors" class="keyword-editors"></div></div>
+      <div class="settings-section"><h2>Tracked journals</h2><p>Use verified ISSNs to avoid collecting the wrong journal. New journals appear in your personal configuration now, but do not enter scheduled collection until the exported configuration is committed to GitHub.</p>
+        <div id="journalEditors" class="journal-editors"></div>
+        <form id="addJournalForm" class="journal-form"><label>Journal name<input id="newJournalName" required maxlength="150" placeholder="Journal name"></label><label>ISSN(s), comma-separated<input id="newJournalIssns" required placeholder="1234-567X"></label><button type="submit" class="outline">Add journal</button></form>
+      </div>
+      <div class="settings-section"><h2>New-paper collection</h2><p>These parameters control future collector runs <strong>after</strong> you export and commit the configuration. Existing papers are never deleted when you change the collection window.</p>
+        <div class="settings-inline"><label>Overlapping lookback window (days)<input id="lookbackDays" type="number" min="7" max="120" step="1"></label><label>Backfill horizon (years)<input id="backfillYears" type="number" min="1" max="5" step="1"></label></div>
+        <div class="settings-actions"><button id="saveWorkspaceSettings" class="primary" type="button">Save settings</button><button id="downloadCollectorConfig" class="outline" type="button">Download collector configuration</button><button id="resetWorkspaceSettings" class="outline" type="button">Restore defaults</button></div>
+        <p class="fine">Download creates a public-safe configuration file, not a private backup. Run <code>python -m collector apply-workspace-config --file ...</code> locally and commit the resulting config files to activate scheduled changes. Only authorized GitHub users can use the research workspace; all authorized users currently have the same application permissions. An administrator-only permission editor is reserved for a future release.</p>
+      </div>
+    </section>
+    <div class="triage-intro" id="triageIntro" hidden><span class="triage-dot"></span><div><strong>Fast review</strong><p>Read the abstract, then acknowledge to clear a paper from your queue. Ratings and visibility changes save immediately; notes save when you leave the field.</p></div></div>
+    <div class="results"><strong id="resultCount">Loading papers…</strong><span id="resultsHint">Metadata-based suggestions; verify before citing.</span></div>
+    <section id="papers" class="papers" aria-live="polite"></section>
+    <nav class="pagination" aria-label="Result pages"><button id="prev" disabled>← Previous</button><span id="page">—</span><button id="next" disabled>Next →</button></nav>
+    <details class="utility-section"><summary>Export filtered papers <span class="utility-hint">CSV · RIS / Zotero</span></summary><div class="utility-content"><p>Exports metadata only, without private notes or abstracts.</p><div class="utility-actions"><button id="exportCsv" type="button" class="outline">Export CSV</button><button id="exportRis" type="button" class="outline">Export RIS</button></div></div></details>
+    <details class="utility-section"><summary>Add a paper by DOI <span class="utility-hint">Personal collection</span></summary><div class="utility-content"><p>Add any valid DOI, regardless of journal. This entry belongs only to your account.</p><form id="manualForm" class="manual-form"><label>DOI<input id="manualDoi" required placeholder="10.1000/example"></label><label>Title (optional)<input id="manualTitle" placeholder="Defaults to DOI"></label><label>Journal (optional)<input id="manualJournal" placeholder="Journal name"></label><button type="submit" class="primary">Add DOI</button></form></div></details>
+    <details class="utility-section"><summary>Private backup &amp; import <span class="utility-hint">Your annotations</span></summary><div class="utility-content"><p>Download your saved notes, ratings, reading status and personal DOIs. Imports skip existing records and keep notes private.</p><div class="backup-tools"><button type="button" class="outline" id="exportBackup">Download my backup</button><label>JSON backup<input id="importBackup" type="file" accept=".json,application/json"></label><button type="button" class="outline" id="importPreview">Review import</button></div><div id="importSummary" class="notice" hidden></div><button type="button" class="primary" id="importConfirm" hidden>Import missing records</button><p class="fine">Backup files contain private notes. Do not upload them to a public repository. Imports cannot be rolled back automatically. Topic overrides and deletion tombstones are not yet included in backup files.</p></div></details>
+    <footer>Topic and article-type suggestions are provisional; verify against publisher metadata. Abstracts are retrieved on demand from Crossref or OpenAlex when available; no abstract text is included in the public catalog. A permanent removal affects your private workspace, not the public journal inventory.</footer>
+  </main>
+</div>
+</body>
+</html>

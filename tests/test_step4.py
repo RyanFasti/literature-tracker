@@ -139,9 +139,9 @@ class PublicCatalogTests(unittest.TestCase):
     def test_workflow_does_not_publish_sqlite_and_has_fail_closed_checks(self):
         workflow = Path(__file__).resolve().parent.parent / '.github/workflows/weekly-public-catalog.yml'
         text = workflow.read_text(encoding='utf-8')
-        for required in ('schedule:', 'workflow_dispatch:', 'update --days 45',
+        for required in ('schedule:', 'workflow_dispatch:', 'update --days',
                          'check-public --path docs/articles.json',
-                         'git add -- docs/index.html docs/app.js docs/styles.css docs/articles.json docs/.nojekyll',
+                         'git add -- docs/index.html docs/app.js docs/styles.css docs/logo.svg docs/logo.png docs/articles.json docs/.nojekyll',
                          'path: public_deploy', 'actions/deploy-pages@v4'):
             self.assertIn(required, text)
         self.assertNotIn('git add .\n', text)

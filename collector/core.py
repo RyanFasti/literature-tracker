@@ -89,7 +89,8 @@ def date_from_crossref(message):
 def normalize_crossref(message):
     doi = normalize_doi(message['DOI'])
     title = strip_markup((message.get('title') or [''])[0])
-    abstract = strip_markup(message.get('abstract', ''))
+    from .abstracts import clean_abstract
+    abstract = clean_abstract(message.get('abstract', ''))
     published = None
     precision = None
     date_source = None
@@ -115,7 +116,8 @@ def normalize_crossref(message):
         'metadata_created': created, 'metadata_deposited': deposited,
         'authors': [strip_markup(' '.join(filter(None, [a.get('given'), a.get('family')])))
                     for a in message.get('author', [])],
-        'type': message.get('type'),
+        'type': (message.get('subtype') if message.get('subtype') in ('review-article', 'research-article')
+                 else message.get('type')),
         'url': message.get('URL') or 'https://doi.org/' + doi,
         'source': 'crossref',
     }

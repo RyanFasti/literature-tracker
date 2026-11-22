@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
+<meta name="theme-color" content="#004c54">
+<link rel="icon" href="./logo.png" type="image/png">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Literature Tracker — Public catalog</title>
 <link rel="stylesheet" href="./styles.css">
@@ -11,16 +13,16 @@
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><div class="mark">LT</div><div><strong>Literature Tracker</strong><small>Research paper catalog</small></div></div>
-  <div class="scope">Read-only public snapshot · No account or private notes</div>
+  <div class="brand"><span class="logo-frame"><img src="./logo.png" width="54" height="42" alt=""></span><div><strong>Literature Tracker</strong><small>Public research catalog</small></div></div>
+  <div class="scope">Research catalog · Public snapshot</div>
 </header>
 <main>
-  <div class="eyebrow">SIX-JOURNAL LITERATURE FEED</div>
-  <div class="heading"><div><h1>Browse the literature</h1><p>Halide-perovskite research selected for inclusion or review. Classification is heuristic, not peer review.</p></div><div class="count"><strong id="totalCount">—</strong><span>papers in catalog</span></div></div>
+  <div class="eyebrow">CURATED SCIENTIFIC LITERATURE</div>
+  <div class="heading"><div><h1>Explore the literature</h1><p>A searchable snapshot of metal-halide perovskite literature. Verify publication type and metadata with the publisher.</p></div><div class="count"><strong id="totalCount">—</strong><span>papers in catalog</span></div></div>
   <section class="controls" aria-label="Search and filter">
     <label class="search"><span>Search papers</span><input id="search" type="search" placeholder="Title, author, DOI, journal…" autocomplete="off"></label>
     <label>Journal<select id="journal"><option value="">All journals</option></select></label>
-    <label>Decision<select id="decision"><option value="">Included + review</option><option value="include">Included</option><option value="review">Needs review</option></select></label>
+    <label>Article type<select id="kind"><option value="">All types</option><option value="review">Review articles</option><option value="research">Research articles</option><option value="unknown">Unverified type</option></select></label>
     <label>Sort<select id="sort"><option value="discovered">Recently discovered</option><option value="published">Publication date</option><option value="title">Title A–Z</option></select></label>
   </section>
   <div class="results"><strong id="resultCount">Loading…</strong><span id="snapshot"></span></div>

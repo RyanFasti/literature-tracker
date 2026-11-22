@@ -5,22 +5,30 @@ import sys
 from datetime import date, timedelta
 
 from .core import classify, crossref_doi, crossref_journal, load_journals, normalize_doi
-from .db import (connect, export_json, now, quality_report, reclassify_database,
+from .db import (abstract_quality_report, connect, export_json, now, quality_report, reclassify_database,
                  record_rejected, sample_rejected, set_user_state, upsert_article)
 from .openalex import enrich_missing_abstracts
+from .abstracts import AbstractResolver
+from .abstract_workflow import repair_abstracts, resolve_before_classification
 
 DEFAULT_DB = 'data/literature.sqlite3'
 
 
-def collect(conn, journals, start, end):
+def collect(conn, journals, start, end, max_abstract_lookups=100, resolver=None):
+    """Enrich BEFORE relevance classification; unresolved papers remain pending."""
+    resolver = resolver or AbstractResolver()
     results = []
     for j in journals:
         count = {'journal': j['id'], 'scanned': 0, 'include': 0, 'review': 0,
                  'reject': 0, 'error': None, 'warnings': [], 'source_counts': {},
                  'created_only': 0, 'updated_only': 0,
-                 'imprecise_publication_dates': 0}
+                 'imprecise_publication_dates': 0,
+                 'abstract_resolved': 0, 'abstract_pending': 0,
+                 'abstract_remote_lookups': 0, 'abstract_provider_errors': 0,
+                 'deleted_skipped': 0}
         started = now()
         seen = set()
+        budget = [max_abstract_lookups]
         retrieval_issns = j.get('crossref_issns', j['issns'])
 
         def collect_mode(mode):
@@ -40,6 +48,18 @@ def collect(conn, journals, start, end):
                             count['updated_only'] += 1
                         if paper.get('published_date_precision') not in ('day',):
                             count['imprecise_publication_dates'] += 1
+                        if conn.execute('SELECT 1 FROM deleted_dois WHERE doi=?', (paper['doi'],)).fetchone():
+                            count['deleted_skipped'] += 1
+                            continue
+                        paper, resolution = resolve_before_classification(
+                            conn, paper, j['id'], resolver, budget)
+                        count['abstract_remote_lookups'] += int(resolution.get('lookup', False))
+                        if not paper.get('abstract'):
+                            count['abstract_pending'] += 1
+                            if resolution['status'] == 'provider_error':
+                                count['abstract_provider_errors'] += 1
+                            continue
+                        count['abstract_resolved'] += 1
                         classification = classify(paper)
                         decision = classification['decision']
                         count[decision] += 1
@@ -72,6 +92,11 @@ def collect(conn, journals, start, end):
                        'created_only': count['created_only'],
                        'updated_only': count['updated_only'],
                        'imprecise_publication_dates': count['imprecise_publication_dates'],
+                       'abstract_resolved': count['abstract_resolved'],
+                       'abstract_pending': count['abstract_pending'],
+                       'abstract_remote_lookups': count['abstract_remote_lookups'],
+                       'abstract_provider_errors': count['abstract_provider_errors'],
+                       'deleted_skipped': count['deleted_skipped'],
                        'window_start': start, 'window_end': end})))
         conn.commit()
         results.append(count)
@@ -114,9 +139,11 @@ def main(argv=None):
     update.add_argument('--days', type=int, default=30)
     update.add_argument('--start', help='YYYY-MM-DD')
     update.add_argument('--end', help='YYYY-MM-DD')
+    update.add_argument('--max-abstract-lookups', type=int, default=100, help='Per-journal remote DOI lookup budget; 0 queues all missing abstracts')
     back = sub.add_parser('backfill', help='Backfill one journal in monthly batches')
     back.add_argument('--journal', required=True)
     back.add_argument('--years', type=int, default=3)
+    back.add_argument('--max-abstract-lookups', type=int, default=100, help='Per 30-day batch DOI lookup budget')
     add = sub.add_parser('add-doi', help='Manually add a DOI, regardless of journal/filter')
     add.add_argument('doi')
     rm = sub.add_parser('delete', help='Delete a paper and block automatic reimport')
@@ -135,6 +162,7 @@ def main(argv=None):
     audit = sub.add_parser('audit', help='Show recent collection run statistics')
     audit.add_argument('--journal')
     sub.add_parser('quality', help='Summarize abstract/date quality and archived rejects')
+    sub.add_parser('abstract-quality', help='Report abstract retrieval by journal and provider')
     reclass = sub.add_parser('reclassify', help='Re-score existing and archived papers without deleting any')
     reclass.add_argument('--dry-run', action='store_true')
     refresh = sub.add_parser('refresh-metadata', help='Repair legacy publication dates via Crossref DOI lookups')
@@ -144,6 +172,17 @@ def main(argv=None):
     enrich.add_argument('--limit', type=int, default=60)
     enrich.add_argument('--retry', action='store_true',
                         help='Retry DOI lookups already checked but still missing abstracts')
+    repair = sub.add_parser('resolve-abstracts', help='Repair existing/pending/archived records BEFORE reclassification')
+    repair.add_argument('--journal', default='all')
+    repair.add_argument('--limit', type=int, default=20)
+    repair.add_argument('--retry', action='store_true', help='Ignore abstract lookup cooldown')
+    repair.add_argument('--dry-run', action='store_true', help='Query providers but do not change SQLite')
+    repair.add_argument('--sources', default='pending,articles,archived', help='Comma-separated: pending,articles,archived')
+    repair.add_argument('--output', default='data/audits/abstract_resolution.csv')
+    pending_export = sub.add_parser('export-pending', help='Write public-safe DOI-only pending inventory (no abstracts)')
+    pending_export.add_argument('--output', default='config/pending-abstracts.json')
+    pending_import = sub.add_parser('import-pending', help='Restore pending inventory for stateless weekly runs')
+    pending_import.add_argument('--file', default='config/pending-abstracts.json')
     browser = sub.add_parser('serve', help='Run the local browser dashboard (SQLite-backed)')
     browser.add_argument('--port', type=int, default=8765)
     browser.add_argument('--no-browser', action='store_true', help='Do not open a browser automatically')
@@ -170,21 +209,50 @@ def main(argv=None):
     public.add_argument('--output', default='docs')
     public.add_argument('--include-abstracts', action='store_true',
                         help='Only if you have verified redistribution rights for ALL included abstracts')
+    refresh_assets = sub.add_parser('refresh-site-assets', help='Update website appearance without replacing its paper catalog')
+    refresh_assets.add_argument('--output', default='docs')
     check_public = sub.add_parser('check-public', help='Fail closed on unsafe public catalog JSON')
     check_public.add_argument('--path', default='docs/articles.json')
     check_public.add_argument('--min-articles', type=int, default=0)
+    team_state = sub.add_parser('export-team-state', help='Export PRIVATE local annotations for team dashboard import')
+    team_state.add_argument('--output', default='data/private/team-state.json')
+    team_assets = sub.add_parser('build-team-assets', help='Build public-safe Cloudflare team Worker assets')
+    team_assets.add_argument('--catalog', default='docs/articles.json')
+    team_assets.add_argument('--output', default='cloud/public')
+    settings_apply = sub.add_parser('apply-workspace-config', help='Validate and apply a downloaded public collector config')
+    settings_apply.add_argument('--file', required=True, help='JSON downloaded from the Settings page')
     merge_public = sub.add_parser('merge-site', help='Merge new papers into persistent public catalog')
     merge_public.add_argument('--previous', required=True)
     merge_public.add_argument('--incoming', required=True)
     merge_public.add_argument('--output', required=True)
     merge_public.add_argument('--exclusions', default='config/public-exclusions.json')
     args = p.parse_args(argv)
+    if args.command == 'apply-workspace-config':
+        from .configuration import apply_export
+        print(json.dumps(apply_export(args.file)))
+        return
+    if args.command == 'refresh-site-assets':
+        from .site import refresh_public_site_assets
+        print(json.dumps(refresh_public_site_assets(args.output)))
+        return
     if args.command == 'check-public':
         from .publication import read_public_catalog
         result = read_public_catalog(args.path)
         if len(result['articles']) < args.min_articles:
             p.error('Public catalog has fewer papers than --min-articles')
         print(json.dumps({'status': 'safe_public_metadata', 'articles': len(result['articles'])}))
+        return
+    if args.command == 'export-team-state':
+        from .team_state import export_local_state
+        conn = connect(args.db)
+        try:
+            print(json.dumps(export_local_state(conn, args.output), ensure_ascii=False))
+        finally:
+            conn.close()
+        return
+    if args.command == 'build-team-assets':
+        from .team import build_team_assets
+        print(json.dumps(build_team_assets(args.catalog, args.output)))
         return
     if args.command == 'merge-site':
         from .publication import merge_public_catalog
@@ -198,7 +266,7 @@ def main(argv=None):
         serve(args.db, port=args.port, open_browser=not args.no_browser)
         return
     journals = load_journals()
-    if args.command in ('update', 'backfill', 'audit-coverage') and args.journal != 'all' and args.journal not in journals:
+    if args.command in ('update', 'backfill', 'audit-coverage', 'resolve-abstracts') and args.journal != 'all' and args.journal not in journals:
         p.error(f'Unknown journal {args.journal!r}; choose from {", ".join(journals)}')
     if args.command == 'compare-publisher' and args.journal not in journals:
         p.error('Unknown journal: ' + args.journal)
@@ -207,24 +275,30 @@ def main(argv=None):
         if args.command == 'update':
             if args.days < 1:
                 p.error('--days must be positive')
+            if not 0 <= args.max_abstract_lookups <= 10000:
+                p.error('--max-abstract-lookups must be 0..10000')
             end = date.fromisoformat(args.end) if args.end else date.today()
             start = date.fromisoformat(args.start) if args.start else end - timedelta(days=args.days)
             if start > end:
                 p.error('start must not exceed end')
             selected = list(journals.values()) if args.journal == 'all' else [journals[args.journal]]
-            results = collect(conn, selected, start.isoformat(), end.isoformat())
+            results = collect(conn, selected, start.isoformat(), end.isoformat(),
+                              max_abstract_lookups=args.max_abstract_lookups)
             if any(x['error'] for x in results):
                 sys.exit(1)
         elif args.command == 'backfill':
             if args.years < 1:
                 p.error('--years must be positive')
+            if not 0 <= args.max_abstract_lookups <= 10000:
+                p.error('--max-abstract-lookups must be 0..10000')
             j = journals[args.journal]
             end = date.today()
             start = end - timedelta(days=round(args.years * 365.25))
             failures = 0
             while start <= end:
                 chunk_end = min(start + timedelta(days=29), end)
-                result = collect(conn, [j], start.isoformat(), chunk_end.isoformat())
+                result = collect(conn, [j], start.isoformat(), chunk_end.isoformat(),
+                                 max_abstract_lookups=args.max_abstract_lookups)
                 failures += int(bool(result[0]['error']))
                 start = chunk_end + timedelta(days=1)
             if failures:
@@ -232,6 +306,7 @@ def main(argv=None):
         elif args.command == 'add-doi':
             doi = normalize_doi(args.doi)
             paper = crossref_doi(doi)
+            paper, _ = resolve_before_classification(conn, paper, 'manual', AbstractResolver())
             upsert_article(conn, paper, classify(paper), manual=True)
             print('Added:', doi)
         elif args.command == 'delete':
@@ -240,6 +315,7 @@ def main(argv=None):
                          (doi, now()))
             conn.execute('DELETE FROM articles WHERE doi=?', (doi,))
             conn.execute('DELETE FROM rejected_candidates WHERE doi=?', (doi,))
+            conn.execute('DELETE FROM pending_abstracts WHERE doi=?', (doi,))
             conn.commit()
             print('Deleted and blocked from automatic reimport:', doi)
         elif args.command == 'state':
@@ -264,6 +340,8 @@ def main(argv=None):
                 print(json.dumps(dict(row)))
         elif args.command == 'quality':
             print(json.dumps(quality_report(conn), indent=2))
+        elif args.command == 'abstract-quality':
+            print(json.dumps(abstract_quality_report(conn), indent=2))
         elif args.command == 'reclassify':
             print(json.dumps(reclassify_database(conn, classify, dry_run=args.dry_run), indent=2))
         elif args.command == 'refresh-metadata':
@@ -273,6 +351,20 @@ def main(argv=None):
             print(json.dumps(result, indent=2))
             if result['errors']:
                 sys.exit(1)
+        elif args.command == 'export-pending':
+            from .pending_index import export_pending
+            print(json.dumps(export_pending(conn, args.output)))
+        elif args.command == 'import-pending':
+            from .pending_index import import_pending
+            print(json.dumps(import_pending(conn, args.file)))
+        elif args.command == 'resolve-abstracts':
+            result = repair_abstracts(conn, journals, args.journal, args.limit,
+                                      retry=args.retry, dry_run=args.dry_run,
+                                      sources=tuple(x.strip() for x in args.sources.split(',')),
+                                      output=args.output)
+            for row in result.pop('results'):
+                print(json.dumps(row, ensure_ascii=False))
+            print(json.dumps(result, indent=2))
         elif args.command == 'enrich':
             if not 1 <= args.limit <= 500:
                 p.error('--limit must be between 1 and 500')

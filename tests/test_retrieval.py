@@ -20,7 +20,7 @@ def example_message():
 
 def example_paper():
     return {'doi': '10.1234/halide-test', 'title': 'MAPbI3 thin films',
-            'abstract': None, 'abstract_status': 'missing', 'journal': 'Example',
+            'abstract': 'Synthetic abstract for regression testing.', 'abstract_status': 'available', 'journal': 'Example',
             'published_date': '2026-11-05', 'authors': [], 'issns': [],
             'source': 'crossref'}
 

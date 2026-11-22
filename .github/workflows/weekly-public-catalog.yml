@@ -38,8 +38,37 @@ jobs:
           test -s docs/articles.json
           python -m collector check-public --path docs/articles.json --min-articles 1
           cp docs/articles.json "$RUNNER_TEMP/previous_articles.json"
-      - name: Collect overlapping 45-day Crossref window
-        run: python -m collector --db data/automation.sqlite3 update --days 45
+      # Publisher API credentials are required during collection, not just
+      # during local testing. Secrets are never printed or committed.
+      - name: Check Elsevier abstract provider configuration
+        shell: bash
+        env:
+          ELSEVIER_API_KEY: ${{ secrets.ELSEVIER_API_KEY }}
+        run: |
+          if [ -z "$ELSEVIER_API_KEY" ]; then
+            echo "::warning title=Elsevier abstracts unavailable::Add the ELSEVIER_API_KEY Actions secret to enable Chemical Engineering Journal abstract retrieval."
+          else
+            echo "Elsevier abstract provider configured."
+          fi
+      - name: Restore and retry pending abstracts from earlier runs
+        shell: bash
+        env:
+          ELSEVIER_API_KEY: ${{ secrets.ELSEVIER_API_KEY }}
+          ELSEVIER_INSTTOKEN: ${{ secrets.ELSEVIER_INSTTOKEN }}
+          OPENALEX_API_KEY: ${{ secrets.OPENALEX_API_KEY }}
+          SEMANTIC_SCHOLAR_API_KEY: ${{ secrets.SEMANTIC_SCHOLAR_API_KEY }}
+        run: |
+          python -m collector --db data/automation.sqlite3 import-pending --file config/pending-abstracts.json
+          python -m collector --db data/automation.sqlite3 resolve-abstracts --sources pending --limit 100 --output data/audits/pending-retries.csv
+      - name: Collect configured overlapping Crossref window
+        env:
+          ELSEVIER_API_KEY: ${{ secrets.ELSEVIER_API_KEY }}
+          ELSEVIER_INSTTOKEN: ${{ secrets.ELSEVIER_INSTTOKEN }}
+          OPENALEX_API_KEY: ${{ secrets.OPENALEX_API_KEY }}
+          SEMANTIC_SCHOLAR_API_KEY: ${{ secrets.SEMANTIC_SCHOLAR_API_KEY }}
+        run: python -m collector --db data/automation.sqlite3 update --days "$(python -c 'import json; print(json.load(open("config/collection.json"))["lookback_days"])')"
+      - name: Preserve unresolved DOI inventory for next week
+        run: python -m collector --db data/automation.sqlite3 export-pending --output config/pending-abstracts.json
       - name: Build, merge, and validate public catalog
         shell: bash
         run: |
@@ -51,7 +80,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- docs/index.html docs/app.js docs/styles.css docs/articles.json docs/.nojekyll
+          git add -- docs/index.html docs/app.js docs/styles.css docs/logo.svg docs/logo.png docs/articles.json docs/.nojekyll config/pending-abstracts.json
           if ! git diff --cached --quiet; then
             git commit -m "Refresh public literature catalog"
             git push
@@ -60,7 +89,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p public_deploy
-          cp docs/index.html docs/app.js docs/styles.css docs/articles.json docs/.nojekyll public_deploy/
+          cp docs/index.html docs/app.js docs/styles.css docs/logo.svg docs/logo.png docs/articles.json docs/.nojekyll public_deploy/
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
       - name: Upload public site artifact
@@ -70,3 +99,38 @@ jobs:
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      # Optional: enabled only after Cloudflare Worker, D1, OAuth and GitHub
+      # repository secrets have been configured. GitHub Pages works without it.
+      - name: Set up Node for team deployment
+        if: ${{ vars.CLOUDFLARE_TEAM_DEPLOY_ENABLED == 'true' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Cloudflare CLI
+        if: ${{ vars.CLOUDFLARE_TEAM_DEPLOY_ENABLED == 'true' }}
+        run: npm install --prefix cloud --no-audit --no-fund
+      - name: Test team Worker authentication and isolation
+        if: ${{ vars.CLOUDFLARE_TEAM_DEPLOY_ENABLED == 'true' }}
+        run: node --test cloud/tests/*.test.mjs
+      - name: Build and validate team static assets
+        if: ${{ vars.CLOUDFLARE_TEAM_DEPLOY_ENABLED == 'true' }}
+        run: python -m collector build-team-assets --catalog docs/articles.json --output cloud/public
+      - name: Render team deployment configuration from repository variables
+        if: ${{ vars.CLOUDFLARE_TEAM_DEPLOY_ENABLED == 'true' }}
+        env:
+          CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
+          CLOUDFLARE_TEAM_BASE_URL: ${{ vars.CLOUDFLARE_TEAM_BASE_URL }}
+          CLOUDFLARE_ALLOWED_GITHUB_USERS: ${{ vars.CLOUDFLARE_ALLOWED_GITHUB_USERS }}
+        run: python cloud/render_ci_config.py
+      - name: Deploy updated team catalog to Cloudflare
+        if: ${{ vars.CLOUDFLARE_TEAM_DEPLOY_ENABLED == 'true' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          cd cloud
+          npx wrangler deploy --config wrangler.ci.toml

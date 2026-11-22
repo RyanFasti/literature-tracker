@@ -1,0 +1,22 @@
+name = "literature-tracker-team"
+main = "src/worker.mjs"
+compatibility_date = "2026-11-18"
+workers_dev = true
+
+# All static assets pass through the Worker. API routes are handled first;
+# the team UI is public HTML, but all personal data requires authentication.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "literature-tracker-team-db"
+database_id = "e2819125-e804-4ee9-9a11-a484c3261f9d"
+migrations_dir = "migrations"
+
+# Public configuration only. NEVER put OAuth secrets or API tokens here.
+[vars]
+PUBLIC_BASE_URL = "https://literature-tracker-team.ryanfasti.workers.dev"
+ALLOWED_GITHUB_USERS = "RyanFasti"

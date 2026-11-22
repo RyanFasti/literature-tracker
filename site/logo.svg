@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Literature Tracker open-book mark">
+  <rect width="64" height="64" rx="16" fill="#004c54"/>
+  <path d="M12 17c7-2 14-1 20 3v29c-6-4-13-5-20-3V17Zm40 0c-7-2-14-1-20 3v29c6-4 13-5 20-3V17Z" fill="#fff" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M32 20v29" stroke="#a5acaf" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M17 26h9m-9 7h9m12-7h9m-9 7h9" stroke="#a5acaf" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M11 50c8-2 15-1 21 3 6-4 13-5 21-3" fill="none" stroke="#a5acaf" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

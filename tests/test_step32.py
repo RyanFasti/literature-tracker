@@ -22,6 +22,7 @@ def crossref_message(doi, title, created, deposited):
         'DOI': doi, 'title': [title],
         'container-title': ['Energy & Environmental Science'],
         'ISSN': ['1754-5692'],
+        'abstract': 'Synthetic neutral abstract for Crossref date regression testing.',
         'published-online': {'date-parts': [[2026]]},
         'created': {'date-parts': [[int(x) for x in created.split('-')]]},
         'deposited': {'date-parts': [[int(x) for x in deposited.split('-')]]},

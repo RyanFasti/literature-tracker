@@ -9,3 +9,14 @@
 __pycache__/
 *.pyc
 # Public static site can be committed deliberately under /docs/.
+# Step 5: generated Worker assets and local/secret configuration.
+/cloud/public/
+/cloud/node_modules/
+/cloud/.wrangler/
+/cloud/.dev.vars
+/cloud/.dev.vars.*
+/cloud/.env
+/cloud/.env.*
+
+# Step 6: generated nonsecret CI configuration (never commit local overrides).
+/cloud/wrangler.ci.toml

@@ -161,8 +161,8 @@ class PreservationAndAuditTests(unittest.TestCase):
         self.assertEqual(self.conn.execute('SELECT note FROM user_articles').fetchone()[0], 'Keep')
 
     def test_rejected_records_can_be_audited_and_promoted_without_deleting(self):
-        unrelated = paper('10.1234/unrelated', 'BaTiO3 oxide perovskite cathode')
-        borderline = paper('10.1234/borderline', 'Ferroelectric perovskite crystals')
+        unrelated = paper('10.1234/unrelated', 'BaTiO3 oxide perovskite cathode', 'Synthetic oxide material study.')
+        borderline = paper('10.1234/borderline', 'Ferroelectric perovskite crystals', 'Synthetic crystallographic study.')
         record_rejected(self.conn, unrelated, classify(unrelated), 'ees')
         record_rejected(self.conn, borderline, {'decision': 'reject', 'score': 0,
                          'reason': 'old rule', 'version': 'rules_v1'}, 'ees')
@@ -209,8 +209,8 @@ class PreservationAndAuditTests(unittest.TestCase):
         self.assertEqual(self.conn.execute('SELECT note FROM user_articles').fetchone()[0], 'Persistent note')
 
     def test_created_mode_is_always_checked_and_rejects_archived(self):
-        irrelevant = paper('10.1234/oxide', 'BaTiO3 oxide perovskites')
-        relevant = paper('10.1234/halide', 'MAPbI3 solar cells')
+        irrelevant = paper('10.1234/oxide', 'BaTiO3 oxide perovskites', 'Synthetic oxide cathode study.')
+        relevant = paper('10.1234/halide', 'MAPbI3 solar cells', 'Synthetic perovskite photovoltaic study.')
         calls = []
 
         def fake_crossref(issn, start, end, mode='pub'):

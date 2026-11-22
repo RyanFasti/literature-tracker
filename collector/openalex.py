@@ -23,8 +23,10 @@ def reconstruct_abstract(index):
         for position in offsets:
             if not isinstance(position, int) or position < 0 or position > 5000:
                 return None
+            if position in positions and positions[position] != token:
+                return None
             positions[position] = token
-    if not positions or len(positions) > 5000:
+    if not positions or len(positions) > 5000 or len(positions) != max(positions) + 1:
         return None
     words = [positions.get(i, '') for i in range(max(positions) + 1)]
     text = strip_markup(' '.join(words))

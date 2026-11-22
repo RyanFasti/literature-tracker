@@ -5,7 +5,7 @@ import html
 import json
 import sqlite3
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 ARTICLE_ADDITIONS = {
@@ -55,6 +55,16 @@ def connect(path):
         ended_at TEXT, scanned INTEGER, included INTEGER, review INTEGER,
         rejected INTEGER, error TEXT
       );
+      CREATE TABLE IF NOT EXISTS pending_abstracts (
+        doi TEXT PRIMARY KEY, journal_id TEXT NOT NULL, paper_json TEXT NOT NULL,
+        first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS abstract_checks (
+        doi TEXT PRIMARY KEY, status TEXT NOT NULL, source TEXT,
+        last_checked_at TEXT NOT NULL, next_retry_at TEXT,
+        check_count INTEGER NOT NULL DEFAULT 0, attempts_json TEXT NOT NULL DEFAULT '[]'
+      );
+      CREATE INDEX IF NOT EXISTS pending_abstracts_journal ON pending_abstracts(journal_id);
       CREATE TABLE IF NOT EXISTS rejected_candidates (
         doi TEXT PRIMARY KEY, journal_id TEXT, paper_json TEXT NOT NULL,
         score REAL NOT NULL, reason TEXT NOT NULL, classifier_version TEXT NOT NULL,
@@ -146,6 +156,7 @@ def upsert_article(conn, paper, classification, manual=False):
         manually_added=MAX(articles.manually_added,excluded.manually_added)
     ''', _article_values(paper, classification, manual, timestamp))
     conn.execute('DELETE FROM rejected_candidates WHERE doi=?', (paper['doi'],))
+    conn.execute('DELETE FROM pending_abstracts WHERE doi=?', (paper['doi'],))
     conn.commit()
     return True
 
@@ -167,6 +178,7 @@ def record_rejected(conn, paper, classification, journal_id):
     ''', (doi, journal_id, json.dumps(paper, ensure_ascii=False),
           classification['score'], classification['reason'],
           classification['version'], timestamp, timestamp))
+    conn.execute('DELETE FROM pending_abstracts WHERE doi=?', (doi,))
     conn.commit()
     return True
 
@@ -187,12 +199,15 @@ def enrich_abstract(conn, doi, abstract, checked_at=None):
 
 def reclassify_database(conn, classify, dry_run=False):
     """Re-score retained articles and archived rejects; never delete or override manual inclusion."""
-    summary = {'articles_checked': 0, 'decision_changes': {},
+    summary = {'articles_checked': 0, 'unresolved_abstracts_skipped': 0, 'decision_changes': {},
                'classifier_versions_updated': 0,
                'rejected_checked': 0, 'promoted': 0, 'still_rejected': 0,
                'dry_run': bool(dry_run)}
     for row in conn.execute('SELECT * FROM articles').fetchall():
         paper = dict(row)
+        if not paper.get('abstract') and not row['manually_added']:
+            summary['unresolved_abstracts_skipped'] += 1
+            continue
         classification = classify(paper)
         if row['manually_added']:
             classification['decision'] = 'include'
@@ -208,6 +223,9 @@ def reclassify_database(conn, classify, dry_run=False):
                                 classification['version'], now(), row['doi']))
     for row in conn.execute('SELECT * FROM rejected_candidates').fetchall():
         paper = json.loads(row['paper_json'])
+        if not paper.get('abstract'):
+            summary['unresolved_abstracts_skipped'] += 1
+            continue
         classification = classify(paper)
         summary['rejected_checked'] += 1
         if classification['decision'] == 'reject':
@@ -302,4 +320,82 @@ def quality_report(conn):
                                        for x in articles)),
         'rejected_candidates_archived': conn.execute('SELECT count(*) FROM rejected_candidates').fetchone()[0],
         'manual_additions': sum(bool(x['manually_added']) for x in articles),
+        'pending_abstracts': conn.execute('SELECT count(*) FROM pending_abstracts').fetchone()[0],
+        'abstract_retrieval_statuses': dict(Counter(x['status'] for x in conn.execute('SELECT status FROM abstract_checks'))),
     }
+
+
+def record_pending_abstract(conn, paper, journal_id):
+    """Never classify/reject an abstract-less DOI; keep full metadata for retry."""
+    doi = paper['doi']
+    if conn.execute('SELECT 1 FROM deleted_dois WHERE doi=?', (doi,)).fetchone():
+        return False
+    timestamp = now()
+    conn.execute('''INSERT INTO pending_abstracts(doi,journal_id,paper_json,first_seen_at,last_seen_at)
+      VALUES(?,?,?,?,?) ON CONFLICT(doi) DO UPDATE SET
+      paper_json=excluded.paper_json,journal_id=excluded.journal_id,
+      last_seen_at=excluded.last_seen_at''',
+      (doi, journal_id, json.dumps(paper, ensure_ascii=False), timestamp, timestamp))
+    # Old versions could reject using title alone. Undo that disposition.
+    conn.execute('DELETE FROM rejected_candidates WHERE doi=?', (doi,))
+    conn.execute("UPDATE articles SET abstract_status='pending' WHERE doi=? AND abstract IS NULL", (doi,))
+    conn.commit()
+    return True
+
+
+def record_abstract_check(conn, doi, result):
+    """Store provenance and retry scheduling, never credentials or abstract text."""
+    checked = now()
+    if result['status'] == 'available':
+        retry = None
+    else:
+        delay = timedelta(hours=6) if result['status'] == 'provider_error' else timedelta(days=3)
+        retry = (datetime.now(timezone.utc) + delay).isoformat()
+    attempts = [{k: x[k] for k in ('provider', 'status', 'error') if k in x}
+                for x in result.get('attempts', [])]
+    conn.execute('''INSERT INTO abstract_checks(doi,status,source,last_checked_at,next_retry_at,check_count,attempts_json)
+      VALUES(?,?,?,?,?,1,?) ON CONFLICT(doi) DO UPDATE SET
+      status=excluded.status,source=excluded.source,
+      last_checked_at=excluded.last_checked_at,next_retry_at=excluded.next_retry_at,
+      check_count=abstract_checks.check_count+1,attempts_json=excluded.attempts_json''',
+      (doi, result['status'], result.get('source'), checked, retry,
+       json.dumps(attempts, ensure_ascii=False)))
+    conn.commit()
+
+
+def get_known_abstract(conn, doi):
+    row = conn.execute('SELECT abstract,abstract_source FROM articles WHERE doi=?', (doi,)).fetchone()
+    if row and row['abstract']:
+        return row['abstract'], row['abstract_source']
+    row = conn.execute('SELECT paper_json FROM rejected_candidates WHERE doi=?', (doi,)).fetchone()
+    if row:
+        paper = json.loads(row['paper_json'])
+        if paper.get('abstract'):
+            return paper['abstract'], paper.get('abstract_source')
+    return None, None
+
+
+def can_retry_abstract(conn, doi, force=False):
+    if force:
+        return True
+    row = conn.execute('SELECT next_retry_at FROM abstract_checks WHERE doi=?', (doi,)).fetchone()
+    return not row or not row['next_retry_at'] or row['next_retry_at'] <= now()
+
+
+def abstract_quality_report(conn):
+    """Report unresolved and resolved metadata without treating pending as absent."""
+    rows = conn.execute('''SELECT journal,
+        count(*) AS retained,
+        sum(CASE WHEN abstract IS NOT NULL AND trim(abstract) != '' THEN 1 ELSE 0 END) AS with_abstract,
+        sum(CASE WHEN abstract IS NULL OR trim(abstract) = '' THEN 1 ELSE 0 END) AS without_abstract
+        FROM articles GROUP BY journal ORDER BY journal''').fetchall()
+    pending = {r['journal_id']: r['n'] for r in conn.execute(
+        'SELECT journal_id,count(*) n FROM pending_abstracts GROUP BY journal_id')}
+    archived = {r['journal_id']: r['n'] for r in conn.execute(
+        'SELECT journal_id,count(*) n FROM rejected_candidates WHERE json_extract(paper_json,\'$.abstract\') IS NULL GROUP BY journal_id')}
+    return {'retained_by_journal': [dict(r) for r in rows],
+            'pending_by_journal_id': pending,
+            'legacy_archived_without_abstract_by_journal_id': archived,
+            'retrieval_by_status': dict(Counter(r['status'] for r in conn.execute('SELECT status FROM abstract_checks'))),
+            'retrieval_by_source': dict(Counter((r['source'] or 'unresolved') for r in conn.execute('SELECT source FROM abstract_checks'))),
+            'warning': 'Counts are not an estimate of publisher abstract coverage or classifier recall.'}
